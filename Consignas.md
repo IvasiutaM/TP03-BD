@@ -54,3 +54,21 @@ Realizarlo en algun tipo de objeto que considere (vista, proced. Almacenado, dis
 **g.8-** incrementar en un valor x%, el sueldo de los empleados en base a su categoria
 
 - Implementar todo sobre la Base de datos, entregar el archivo de datos, backup y log.
+
+* Investigue: implementacion y uso de CURSORES en consultas SQL en SGBDR, y resuelva:
+
+**H) Transacciones**
+
+***Asignado a:*** Ledesma
+
+**h.1)** Implementar un Modelo Transaccional (Begin, Commit, Rollback) sobre 2 Stores Procedures:
+(SP_Debito y SP_Credito), que aseguren cada uno la completa ejecución de las operaciones de:
+Debito y Crédito, respectivamente, y todo su control asociado.- con parámetros, control errores, etc.
+
+**h.2)** luego, implementar el modelo Transaccional sobre el SP: SP_TRANSFERENCIA, evaluando donde y como corresponde disponer las instrucciones transaccionales. (considere que este sp invoca a los 2 anteriores)
+
+**I – CURSORES:** Resuelva mediante el uso de **CURSORES:** (dentro de un SP)
+
+**i.1-** En base a la categoria del Empleado, actualizar su sueldo en un x% (+), en base al siguiente detalle: caj -> 10%, adm -> 15% y ger-> 12%, (éstos 6 datos se ingresan como parámetros al sp)
+
+**i.2)** otorgar un premio del 5% de intereses (+), al saldo de las cuentas que sean del tipo: PF (Plazo Fijo), y cuyo saldo sea mayor de $ 50,000.00 a la fecha de hoy.
