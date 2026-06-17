@@ -33,6 +33,8 @@ CASE
 
 **G) Implementar las soluciones a los siguientes casos,**
 
+***Asignado a:*** Mior
+
 Realizarlo en algun tipo de objeto que considere (vista, proced. Almacenado, disparador), utilizando las instrucciones y estructuras de control y utilizando las variables del sistema @, o @@ o definiendo las propias, como tambien los parámetros de entrada y salida:
 
 **g.1-** Actualizar el saldo de una cuenta en cierto %
