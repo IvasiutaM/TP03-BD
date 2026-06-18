@@ -3,7 +3,7 @@
 
 **F) Instrucciones con Estructuras de Control Transact-SQL (IF, ELSE,...DECLARE, SET, )**
 
-***Asignado a:*** Ivasiuta
+***📚Asignado a:*** Ivasiuta
 
 **f.1)** Modificar los SP de tps anteriores, para que implementen los controles necesarios de integridad (verificar que no exista el registro, generar un siguiente nro de Id, etc.) antes de Realizar las Operaciones de (Ins, Upd, Del), y generar Msg de error, capturar err o datos en parámetros output (salida en el SP), lanzar excepciones (msg), (err) según error capturado / generado, invocar / ejecutar otro SP anidado, etc.- (utilizar estructuras de control de T-SQL).-
 
@@ -33,7 +33,7 @@ CASE
 
 **G) Implementar las soluciones a los siguientes casos,**
 
-***Asignado a:*** Mior
+***📚Asignado a:*** Mior
 
 Realizarlo en algun tipo de objeto que considere (vista, proced. Almacenado, disparador), utilizando las instrucciones y estructuras de control y utilizando las variables del sistema @, o @@ o definiendo las propias, como tambien los parámetros de entrada y salida:
 
@@ -59,7 +59,7 @@ Realizarlo en algun tipo de objeto que considere (vista, proced. Almacenado, dis
 
 **H) Transacciones**
 
-***Asignado a:*** Ledesma
+***📚Asignado a:*** Ledesma
 
 **h.1)** Implementar un Modelo Transaccional (Begin, Commit, Rollback) sobre 2 Stores Procedures:
 (SP_Debito y SP_Credito), que aseguren cada uno la completa ejecución de las operaciones de:
