@@ -1181,3 +1181,8 @@ END; $$;
 CREATE TRIGGER trg_actualizar_saldo
 AFTER INSERT ON MOVIMIENTOS
 FOR EACH ROW EXECUTE FUNCTION fn_actualizar_saldo();
+
+-- ===============================================================
+--              DESARROLLO TRABAJO PRÁCTICO 3
+-- ===============================================================
+
