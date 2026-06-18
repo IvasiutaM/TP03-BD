@@ -69,6 +69,8 @@ Debito y Crédito, respectivamente, y todo su control asociado.- con parámetros
 
 **I – CURSORES:** Resuelva mediante el uso de **CURSORES:** (dentro de un SP)
 
+***📚Asignado a:*** Ledesma
+
 **i.1-** En base a la categoria del Empleado, actualizar su sueldo en un x% (+), en base al siguiente detalle: caj -> 10%, adm -> 15% y ger-> 12%, (éstos 6 datos se ingresan como parámetros al sp)
 
 **i.2)** otorgar un premio del 5% de intereses (+), al saldo de las cuentas que sean del tipo: PF (Plazo Fijo), y cuyo saldo sea mayor de $ 50,000.00 a la fecha de hoy.
