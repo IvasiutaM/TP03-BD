@@ -1185,6 +1185,263 @@ FOR EACH ROW EXECUTE FUNCTION fn_actualizar_saldo();
 -- ===============================================================
 --              DESARROLLO TRABAJO PRÁCTICO 3
 -- ===============================================================
+-- ===============================================================
+-- G - Implementar las soluciones a los siguientes casos
+-- ===============================================================
+
+-- ===============================================================
+-- G.1 - Actualizar el saldo de una cuenta en cierto %
+-- ===============================================================
+
+--SP para actualizar el saldo de una cuenta incrementándolo o disminuyéndolo según un porcentaje indicado.
+
+CREATE OR REPLACE PROCEDURE sp_actualizar_saldo_porcentaje(
+    p_nrcuenta INT,
+    p_porcentaje NUMERIC
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_saldo MONEY;
+BEGIN
+    SELECT saldo
+    INTO v_saldo
+    FROM cuentas
+    WHERE nrcuenta = p_nrcuenta;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'La cuenta % no existe', p_nrcuenta;
+    END IF;
+
+    UPDATE cuentas
+    SET saldo = saldo + (saldo * p_porcentaje / 100)
+    WHERE nrcuenta = p_nrcuenta;
+
+    RAISE NOTICE 'Saldo actualizado correctamente';
+END;
+$$;
+
+-- ===============================================================
+-- G.2 - Modificar el domicilio de un cliente X
+-- ===============================================================
+
+--SP para modificar la ciudad y el código de ciudad asociados a un cliente determinado.
+
+CREATE OR REPLACE PROCEDURE sp_modificar_domicilio_cliente(
+    p_dni INT,
+    p_ciudad CHAR(30),
+    p_codciud INT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM clientes
+        WHERE dni = p_dni
+    ) THEN
+        RAISE EXCEPTION 'Cliente inexistente';
+    END IF;
+
+    UPDATE clientes
+    SET ciudad = p_ciudad,
+        codciud = p_codciud
+    WHERE dni = p_dni;
+
+    RAISE NOTICE 'Domicilio actualizado';
+END;
+$$;
+
+-- ===============================================================
+-- G.3 - Obtener todas las cuentas pertenecientes a un cliente X
+-- ===============================================================
+
+--FN para obtener el listado completo de cuentas pertenecientes a un cliente identificado por su DNI.
+
+CREATE OR REPLACE FUNCTION fn_cuentas_cliente(
+    p_dni INT
+)
+RETURNS TABLE(
+    nro_cuenta INT,
+    tipo_cuenta INT,
+    saldo MONEY,
+    sucursal INT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+
+    RETURN QUERY
+    SELECT
+        c.nrcuenta,
+        c.tipocuenta,
+        c.saldo,
+        c.nrsuc
+    FROM cuentas c
+    WHERE c.dni = p_dni;
+
+END;
+$$;
+
+-- ===============================================================
+-- G.4 - Obtener la suma de los saldos de todas las cuentas de un cliente X
+-- ===============================================================
+
+--FN para calcular y devolver la suma total de los saldos de todas las cuentas de un cliente.
+
+CREATE OR REPLACE FUNCTION fn_total_saldos_cliente(
+    p_dni INT
+)
+RETURNS MONEY
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_total MONEY;
+BEGIN
+
+    SELECT COALESCE(SUM(saldo),'0')
+    INTO v_total
+    FROM cuentas
+    WHERE dni = p_dni;
+
+    RETURN v_total;
+
+END;
+$$;
+
+-- ===============================================================
+-- G.5 - Obtener ciudad y provincia donde se encuentra la sucursal de la cuenta X
+-- ===============================================================
+
+--FN para obtener la ciudad y la provincia donde se encuentra la sucursal asociada a una cuenta específica.
+
+CREATE OR REPLACE FUNCTION fn_ubicacion_sucursal_cuenta(
+    p_nrcuenta INT
+)
+RETURNS TABLE(
+    ciudad VARCHAR(30),
+    provincia VARCHAR(30)
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+
+    RETURN QUERY
+    SELECT
+        ci.ciudad::VARCHAR(30),
+        pr.provincia::VARCHAR(30)
+    FROM cuentas c
+         JOIN sucursales s ON c.nrsuc = s.nrsuc
+         JOIN ciudades ci ON s.codciud = ci.codciud
+         JOIN provincias pr ON ci.codprov = pr.codprov
+    WHERE c.nrcuenta = p_nrcuenta;
+
+END;
+$$;
+
+-- ===============================================================
+-- G.6 - Calcular monto total de extracciones de una cuenta X durante los últimos N días
+-- ===============================================================
+
+--FN para calcular el monto total extraído de una cuenta durante una cantidad determinada de días.
+
+CREATE OR REPLACE FUNCTION fn_total_extracciones(
+    p_nrcuenta INT,
+    p_dias INT
+)
+RETURNS MONEY
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_total MONEY;
+BEGIN
+
+    SELECT COALESCE(SUM(m.monto),'0')
+    INTO v_total
+    FROM movimientos m
+         JOIN tiposoperaciones t
+              ON m.codop = t.codop
+    WHERE m.nrcuenta = p_nrcuenta
+      AND t.tipooperacion = 'Extracción'
+      AND m.fecha >= CURRENT_DATE - p_dias;
+
+    RETURN v_total;
+
+END;
+$$;
+
+-- ===============================================================
+-- G.7 - Obtener los últimos N movimientos sobre la cuenta X agrupados por tipo de operación
+-- ===============================================================
+
+--FN para recuperar los últimos movimientos de una cuenta y los agrupa según el tipo de operación realizada.
+
+CREATE OR REPLACE FUNCTION fn_ultimos_movimientos(
+    p_nrcuenta INT,
+    p_cantidad INT
+)
+RETURNS TABLE(
+    tipo_operacion CHAR(30),
+    cantidad BIGINT,
+    monto_total MONEY
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+
+    RETURN QUERY
+
+    SELECT
+        t.tipooperacion,
+        COUNT(*),
+        SUM(m.monto)
+    FROM (
+            SELECT *
+            FROM movimientos
+            WHERE nrcuenta = p_nrcuenta
+            ORDER BY fecha DESC
+            LIMIT p_cantidad
+         ) m
+         JOIN tiposoperaciones t
+              ON m.codop = t.codop
+    GROUP BY t.tipooperacion;
+
+END;
+$$;
+
+-- ===============================================================
+-- G.8 - Incrementar en un valor X% el sueldo de los empleados según categoría
+-- ===============================================================
+
+--SP para incrementar el sueldo base de una categoría de empleados aplicando un porcentaje especificado.
+
+CREATE OR REPLACE PROCEDURE sp_incrementar_sueldo_categoria(
+    p_codcateg INT,
+    p_porcentaje NUMERIC
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_sueldo MONEY;
+BEGIN
+
+    SELECT sueldo
+    INTO v_sueldo
+    FROM categorias
+    WHERE codcateg = p_codcateg;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Categoría inexistente';
+    END IF;
+
+    UPDATE categorias
+    SET sueldo = sueldo + (sueldo * p_porcentaje / 100)
+    WHERE codcateg = p_codcateg;
+
+    RAISE NOTICE 'Sueldo actualizado correctamente';
+END;
+$$;
 
 -- ===============================================================
 -- H - Transacciones
