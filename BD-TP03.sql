@@ -1186,6 +1186,429 @@ FOR EACH ROW EXECUTE FUNCTION fn_actualizar_saldo();
 --              DESARROLLO TRABAJO PRÁCTICO 3
 -- ===============================================================
 
+-- ===================================================================================
+-- F:  Instrucciones con Estructuras de Control Transact-SQL (IF, ELSE,…DECLARE, SET,)
+-- ===================================================================================
+DROP PROCEDURE IF EXISTS sp_registrar_movimiento(INT, MONEY, DATE, INT);
+DROP PROCEDURE IF EXISTS sp_alta_cliente_cuenta(INT, CHAR, CHAR, INT, INT, INT, MONEY, INT);
+DROP PROCEDURE IF EXISTS sp_transferencia(INT, INT, MONEY, DATE);
+
+-- ===================================================================================
+-- F.1 - modificación de los SP
+-- ===================================================================================
+
+CREATE OR REPLACE PROCEDURE sp_registrar_movimiento(
+    p_nrcuenta INT,
+    p_monto MONEY,
+    p_fecha DATE,
+    p_codop INT,
+    OUT p_codigo_error INT,
+    OUT p_mensaje VARCHAR(255)
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_nrmov INT;
+    v_tipocuenta INT;
+    v_tipooperacion CHAR(50);
+    v_saldo_actual MONEY;
+BEGIN
+    -- Inicializar salidas
+    p_codigo_error := 0;
+    p_mensaje := '';
+    
+    IF p_monto <= 0 THEN -- monto debe ser > 0
+        p_codigo_error := 1;
+        p_mensaje := 'Error: Monto debe ser mayor a 0';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta) THEN -- cuenta debe existir
+        p_codigo_error := 2;
+        p_mensaje := 'Error: Cuenta ' || p_nrcuenta || ' no existe';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM OPERACIONES WHERE CodOp = p_codop) THEN     -- operación debe existir
+        p_codigo_error := 3;
+        p_mensaje := 'Error: Operación ' || p_codop || ' no existe';
+        RETURN;
+    END IF;
+    
+    SELECT t.TipoOperacion INTO v_tipooperacion 
+    FROM OPERACIONES o
+    JOIN TIPOSOPERACIONES t ON o.CodTipoOp = t.CodTipoOp
+    WHERE o.CodOp = p_codop;
+    
+    SELECT Saldo INTO v_saldo_actual FROM CUENTAS 
+    WHERE NrCuenta = p_nrcuenta;
+    
+    IF v_tipooperacion = 'Debe' AND v_saldo_actual < p_monto THEN -- si es Debe, debe haber saldo suficiente
+        p_codigo_error := 4;
+        p_mensaje := 'Error: Saldo insuficiente. Disponible: ' || v_saldo_actual;
+        RETURN;
+    END IF;
+    
+    SELECT COALESCE(MAX(NrMov), 0) + 1 INTO v_nrmov FROM MOVIMIENTOS; -- Generar siguiente NrMov
+    
+    SELECT TipoCuenta INTO v_tipocuenta FROM CUENTAS 
+    WHERE NrCuenta = p_nrcuenta;
+    
+    INSERT INTO MOVIMIENTOS (NrMov, Monto, Fecha, NrCuenta, CodOp, TipoCuenta)
+    VALUES (v_nrmov, p_monto, p_fecha, p_nrcuenta, p_codop, v_tipocuenta);
+    
+    p_codigo_error := 0;
+    p_mensaje := 'Movimiento ' || v_nrmov || ' registrado correctamente';
+    
+EXCEPTION WHEN OTHERS THEN
+    p_codigo_error := 99;
+    p_mensaje := 'Error: ' || SQLERRM;
+END; $$;
+
+CREATE OR REPLACE PROCEDURE sp_alta_cliente_cuenta(
+    p_dni INT,
+    p_apellido CHAR(30),
+    p_ciudad CHAR(30),
+    p_codciud INT,
+    p_nrcuenta INT,
+    p_tipocuenta INT,
+    p_saldo_inicial MONEY,
+    p_nrsuc INT,
+    OUT p_codigo_error INT,
+    OUT p_mensaje VARCHAR(255)
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+    p_codigo_error := 0;
+    p_mensaje := '';
+    
+    IF EXISTS (SELECT 1 FROM CLIENTES WHERE DNI = p_dni) THEN -- Valido queDNI no debe existir
+        p_codigo_error := 1;
+        p_mensaje := 'Error: Cliente con DNI ' || p_dni || ' ya existe';
+        RETURN;
+    END IF;
+    
+    IF EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta) THEN -- Validoque NrCuenta no debe existir
+        p_codigo_error := 2;
+        p_mensaje := 'Error: Cuenta ' || p_nrcuenta || ' ya existe';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM CIUDADES WHERE CodCiud = p_codciud) THEN -- Valido que ciudad existe
+        p_codigo_error := 3;
+        p_mensaje := 'Error: Ciudad ' || p_codciud || ' no existe';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM SUCURSALES WHERE NrSuc = p_nrsuc) THEN -- Valido que sucursal existe
+        p_codigo_error := 4;
+        p_mensaje := 'Error: Sucursal ' || p_nrsuc || ' no existe';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM TIPOSCUENTAS WHERE TipoCuenta = p_tipocuenta) THEN -- Valido que el tipo de cuenta existe
+        p_codigo_error := 5;
+        p_mensaje := 'Error: Tipo de cuenta ' || p_tipocuenta || ' no existe';
+        RETURN;
+    END IF;
+    
+    IF p_saldo_inicial < 0 THEN -- Valido que el saldo inicial >= 0
+        p_codigo_error := 6;
+        p_mensaje := 'Error: Saldo inicial no puede ser negativo';
+        RETURN;
+    END IF;
+    
+    INSERT INTO CLIENTES (DNI, Apellido, Ciudad, CodCiud)
+    VALUES (p_dni, p_apellido, p_ciudad, p_codciud);
+    
+    INSERT INTO CUENTAS (NrCuenta, TipoCuenta, Saldo, DNI, NrSuc)
+    VALUES (p_nrcuenta, p_tipocuenta, p_saldo_inicial, p_dni, p_nrsuc);
+    
+    p_codigo_error := 0;
+    p_mensaje := 'Cliente ' || p_dni || ' y cuenta ' || p_nrcuenta || ' creados';
+    
+EXCEPTION WHEN OTHERS THEN
+    p_codigo_error := 99;
+    p_mensaje := 'Error: ' || SQLERRM;
+END; $$;
+
+CREATE OR REPLACE PROCEDURE sp_transferencia(
+    p_nrcuenta_origen INT,
+    p_nrcuenta_destino INT,
+    p_monto MONEY,
+    p_fecha DATE,
+    OUT p_codigo_error INT,
+    OUT p_mensaje VARCHAR(255)
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_saldo_origen MONEY;
+    v_tipocuenta_origen INT;
+    v_tipocuenta_destino INT;
+    v_nrmov_sal INT;
+    v_nrmov_ent INT;
+BEGIN
+    p_codigo_error := 0;
+    p_mensaje := '';
+    
+    IF p_monto <= 0 THEN -- Valido que monto > 0
+        p_codigo_error := 1;
+        p_mensaje := 'Error: Monto debe ser mayor a 0';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta_origen) THEN -- Valido si ambas cuentas existen
+        p_codigo_error := 2;
+        p_mensaje := 'Error: Cuenta origen ' || p_nrcuenta_origen || ' no existe';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta_destino) THEN
+        p_codigo_error := 3;
+        p_mensaje := 'Error: Cuenta destino ' || p_nrcuenta_destino || ' no existe';
+        RETURN;
+    END IF;
+    
+    IF p_nrcuenta_origen = p_nrcuenta_destino THEN 
+        p_codigo_error := 4;
+        p_mensaje := 'Error: Las cuentas deben ser diferentes';
+        RETURN;
+    END IF;
+    
+    SELECT Saldo INTO v_saldo_origen FROM CUENTAS -- Valido si el saldo suficiente
+    WHERE NrCuenta = p_nrcuenta_origen;
+    
+    IF v_saldo_origen < p_monto THEN
+        p_codigo_error := 5;
+        p_mensaje := 'Error: Saldo insuficiente. Disponible: ' || v_saldo_origen;
+        RETURN;
+    END IF;
+    
+    SELECT COALESCE(MAX(NrMov), 0) + 1 INTO v_nrmov_sal FROM MOVIMIENTOS; -- Generar números de movimiento
+    v_nrmov_ent := v_nrmov_sal + 1;
+    
+    SELECT TipoCuenta INTO v_tipocuenta_origen FROM CUENTAS 
+    WHERE NrCuenta = p_nrcuenta_origen;
+    
+    SELECT TipoCuenta INTO v_tipocuenta_destino FROM CUENTAS 
+    WHERE NrCuenta = p_nrcuenta_destino;
+    
+    INSERT INTO MOVIMIENTOS (NrMov, Monto, Fecha, NrCuenta, CodOp, TipoCuenta)
+    VALUES (v_nrmov_sal, p_monto, p_fecha, p_nrcuenta_origen, 5, v_tipocuenta_origen);
+    
+    INSERT INTO MOVIMIENTOS (NrMov, Monto, Fecha, NrCuenta, CodOp, TipoCuenta)
+    VALUES (v_nrmov_ent, p_monto, p_fecha, p_nrcuenta_destino, 6, v_tipocuenta_destino);
+    
+    p_codigo_error := 0;
+    p_mensaje := 'Transferencia de ' || p_monto || ' completada. Movimientos: ' || v_nrmov_sal || ', ' || v_nrmov_ent;
+    
+EXCEPTION WHEN OTHERS THEN
+    p_codigo_error := 99;
+    p_mensaje := 'Error: ' || SQLERRM;
+END; $$;
+
+-- ===================================================================================
+-- F.2 - nuevos SP
+-- ===================================================================================
+-- SP debido
+CREATE OR REPLACE PROCEDURE sp_debito(
+    p_nrcuenta INT,
+    p_monto MONEY,
+    p_fecha DATE,
+    OUT p_codigo_error INT,
+    OUT p_mensaje VARCHAR(255)
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_saldo MONEY;
+    v_tipocuenta INT;
+    v_nrmov INT;
+BEGIN
+    p_codigo_error := 0;
+    p_mensaje := '';
+    
+    IF NOT EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta) THEN -- Valido cuenta existe
+        p_codigo_error := 1;
+        p_mensaje := 'Error: Cuenta no existe';
+        RETURN;
+    END IF;
+    
+    SELECT Saldo INTO v_saldo FROM CUENTAS WHERE NrCuenta = p_nrcuenta; -- Valido saldo suficiente
+    IF v_saldo < p_monto THEN
+        p_codigo_error := 2;
+        p_mensaje := 'Error: Saldo insuficiente';
+        RETURN;
+    END IF;
+    
+    SELECT COALESCE(MAX(NrMov), 0) + 1 INTO v_nrmov FROM MOVIMIENTOS;
+    SELECT TipoCuenta INTO v_tipocuenta FROM CUENTAS WHERE NrCuenta = p_nrcuenta;
+    
+    INSERT INTO MOVIMIENTOS (NrMov, Monto, Fecha, NrCuenta, CodOp, TipoCuenta)
+    VALUES (v_nrmov, p_monto, p_fecha, p_nrcuenta, 5, v_tipocuenta);
+    
+    p_codigo_error := 0;
+    p_mensaje := 'Débito registrado';
+    
+EXCEPTION WHEN OTHERS THEN
+    p_codigo_error := 99;
+    p_mensaje := 'Error en débito: ' || SQLERRM;
+END; $$;
+
+-- SP credito
+CREATE OR REPLACE PROCEDURE sp_credito(
+    p_nrcuenta INT,
+    p_monto MONEY,
+    p_fecha DATE,
+    OUT p_codigo_error INT,
+    OUT p_mensaje VARCHAR(255)
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_tipocuenta INT;
+    v_nrmov INT;
+BEGIN
+    p_codigo_error := 0;
+    p_mensaje := '';
+    
+    IF NOT EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta) THEN -- Valido  cuenta existe
+        p_codigo_error := 1;
+        p_mensaje := 'Error: Cuenta no existe';
+        RETURN;
+    END IF;
+    
+    SELECT COALESCE(MAX(NrMov), 0) + 1 INTO v_nrmov FROM MOVIMIENTOS;
+    SELECT TipoCuenta INTO v_tipocuenta FROM CUENTAS WHERE NrCuenta = p_nrcuenta;
+    
+    INSERT INTO MOVIMIENTOS (NrMov, Monto, Fecha, NrCuenta, CodOp, TipoCuenta)
+    VALUES (v_nrmov, p_monto, p_fecha, p_nrcuenta, 6, v_tipocuenta);
+    
+    p_codigo_error := 0;
+    p_mensaje := 'Crédito registrado';
+    
+EXCEPTION WHEN OTHERS THEN
+    p_codigo_error := 99;
+    p_mensaje := 'Error en crédito: ' || SQLERRM;
+END; $$;
+
+-- SP transferenciaTransaccional
+CREATE OR REPLACE PROCEDURE sp_transferencia_transaccional(
+    p_nrcuenta_origen INT,
+    p_nrcuenta_destino INT,
+    p_monto MONEY,
+    p_fecha DATE,
+    OUT p_codigo_error INT,
+    OUT p_mensaje VARCHAR(255)
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_error_deb INT;
+    v_msg_deb VARCHAR(255);
+    v_error_cred INT;
+    v_msg_cred VARCHAR(255);
+    v_saldo MONEY;
+BEGIN
+    p_codigo_error := 0;
+    p_mensaje := '';
+    
+    IF p_monto <= 0 THEN -- Valido si monto > 0
+        p_codigo_error := 1;
+        p_mensaje := 'Error: Monto debe ser mayor a 0';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta_origen) THEN -- valido cuentas existen
+        p_codigo_error := 2;
+        p_mensaje := 'Error: Cuenta origen no existe';
+        RETURN;
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM CUENTAS WHERE NrCuenta = p_nrcuenta_destino) THEN
+        p_codigo_error := 3;
+        p_mensaje := 'Error: Cuenta destino no existe';
+        RETURN;
+    END IF;
+    
+    IF p_nrcuenta_origen = p_nrcuenta_destino THEN -- Valido cuentas diferentes
+        p_codigo_error := 4;
+        p_mensaje := 'Error: Las cuentas deben ser diferentes';
+        RETURN;
+    END IF;
+    
+    SELECT Saldo INTO v_saldo FROM CUENTAS WHERE NrCuenta = p_nrcuenta_origen; -- Valido si saldo suficiente
+    IF v_saldo < p_monto THEN
+        p_codigo_error := 5;
+        p_mensaje := 'Error: Saldo insuficiente';
+        RETURN;
+    END IF;
+    
+    BEGIN
+        CALL sp_debito(p_nrcuenta_origen, p_monto, p_fecha, v_error_deb, v_msg_deb);
+        IF v_error_deb != 0 THEN
+            RAISE EXCEPTION 'Error en débito: %', v_msg_deb;
+        END IF;
+        
+        CALL sp_credito(p_nrcuenta_destino, p_monto, p_fecha, v_error_cred, v_msg_cred);
+        IF v_error_cred != 0 THEN
+            RAISE EXCEPTION 'Error en crédito: %', v_msg_cred;
+        END IF;
+        
+        p_codigo_error := 0;
+        p_mensaje := 'Transferencia completada: ' || p_monto;
+        
+    EXCEPTION WHEN OTHERS THEN
+        p_codigo_error := 99;
+        p_mensaje := 'Error en transferencia: ' || SQLERRM;
+    END;
+    
+END; $$;
+
+-- ===================================================================================
+-- F.3 - CASE, WHEN
+-- ===================================================================================
+-- ===================================================================================
+-- F.3.a -- función para obtener tipo de cuenta
+-- ===================================================================================
+CREATE OR REPLACE FUNCTION fn_obtener_tipo_cuenta(p_nrcuenta INT)
+RETURNS VARCHAR(50)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_tipo INT;
+    v_resultado VARCHAR(50);
+BEGIN
+    SELECT TipoCuenta INTO v_tipo FROM CUENTAS WHERE NrCuenta = p_nrcuenta;
+    
+    SELECT CASE v_tipo
+        WHEN 1 THEN 'Caja de Ahorro'
+        WHEN 2 THEN 'Cuenta Corriente'
+        WHEN 3 THEN 'Cuenta en Dólares'
+        WHEN 4 THEN 'Plazo Fijo'
+        ELSE 'Tipo desconocido'
+    END INTO v_resultado;
+    
+    RETURN v_resultado;
+END; $$;
+
+-- ===================================================================================
+-- F.3.b -- función para clasificar cuentas por saldo
+-- ===================================================================================
+CREATE OR REPLACE FUNCTION fn_clasificar_cuentas_por_saldo(p_nrcuenta INT)
+RETURNS VARCHAR(50)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_saldo MONEY;
+    v_clasificacion VARCHAR(50);
+BEGIN
+    SELECT Saldo INTO v_saldo FROM CUENTAS WHERE NrCuenta = p_nrcuenta;
+    
+    SELECT CASE
+        WHEN v_saldo < 10000 THEN 'Saldo bajo'
+        WHEN v_saldo BETWEEN 10000 AND 50000 THEN 'Saldo medio'
+        WHEN v_saldo > 50000 THEN 'Saldo alto'
+        ELSE 'No clasificado'
+    END INTO v_clasificacion;
+    
+    RETURN v_clasificacion;
+END; $$;
+
 -- ===============================================================
 -- H - Transacciones
 -- ===============================================================
