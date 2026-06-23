@@ -1186,3 +1186,277 @@ FOR EACH ROW EXECUTE FUNCTION fn_actualizar_saldo();
 --              DESARROLLO TRABAJO PRÁCTICO 3
 -- ===============================================================
 
+-- ===============================================================
+-- H - Transacciones
+-- ===============================================================
+
+-- ===============================================================
+-- H.1 - SP_Debito (Modelo transaccional)
+-- ===============================================================
+
+-- SP para realizar un débito en una cuenta, registrando el movimiento y actualizando el saldo de la cuenta.
+CREATE OR REPLACE PROCEDURE sp_debito(
+    p_nrmov INT,
+    p_nrcuenta INT,
+    p_codop INT,
+    p_monto MONEY,
+    p_fecha DATE DEFAULT CURRENT_DATE
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_saldo_actual MONEY;
+    v_tipocuenta INT;
+    v_codtipoop INT;
+BEGIN
+    IF p_monto <= '0'::MONEY THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: El monto a debitar debe ser mayor a cero.';
+    END IF;
+
+    -- FOR UPDATE bloquea la fila de la cuenta temporalmente para evitar 
+    -- que otra transacción modifique el saldo mientras hacemos esta validación.
+    SELECT Saldo, TipoCuenta INTO v_saldo_actual, v_tipocuenta
+    FROM CUENTAS WHERE NrCuenta = p_nrcuenta FOR UPDATE;
+
+    IF NOT FOUND THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: No existe la cuenta con número %.', p_nrcuenta;
+    END IF;
+
+    SELECT CodTipoOp INTO v_codtipoop
+    FROM OPERACIONES WHERE CodOp = p_codop;
+
+    IF NOT FOUND THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: No existe la operación con código %.', p_codop;
+    END IF;
+
+    IF v_codtipoop != 1 THEN -- 1 = Debe
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: La operación % no es válida. Debe ser de tipo Débito (Debe).', p_codop;
+    END IF;
+
+    IF v_saldo_actual < p_monto THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: Saldo insuficiente. Saldo actual: %.', v_saldo_actual;
+    END IF;
+
+    INSERT INTO MOVIMIENTOS (NrMov, Monto, Fecha, NrCuenta, CodOp, TipoCuenta)
+    VALUES (p_nrmov, p_monto, p_fecha, p_nrcuenta, p_codop, v_tipocuenta);
+
+    UPDATE CUENTAS 
+    SET Saldo = Saldo - p_monto 
+    WHERE NrCuenta = p_nrcuenta;
+
+    COMMIT;
+    RAISE NOTICE 'Transacción Exitosa: Débito % registrado en la cuenta %.', p_nrmov, p_nrcuenta;
+
+END; $$;
+
+-- ===============================================================
+-- H.1 - SP_Credito (Modelo transaccional)
+-- ===============================================================
+
+-- SP para realizar un crédito en una cuenta, registrando el movimiento y actualizando el saldo de la cuenta.
+
+CREATE OR REPLACE PROCEDURE sp_credito(
+    p_nrmov INT,
+    p_nrcuenta INT,
+    p_codop INT,
+    p_monto MONEY,
+    p_fecha DATE DEFAULT CURRENT_DATE
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_saldo_actual MONEY;
+    v_tipocuenta INT;
+    v_codtipoop INT;
+BEGIN
+    IF p_monto <= '0'::MONEY THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: El monto a acreditar debe ser mayor a cero.';
+    END IF;
+
+    -- Bloqueo preventivo de la fila
+    SELECT Saldo, TipoCuenta INTO v_saldo_actual, v_tipocuenta
+    FROM CUENTAS WHERE NrCuenta = p_nrcuenta FOR UPDATE;
+
+    IF NOT FOUND THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: No existe la cuenta con número %.', p_nrcuenta;
+    END IF;
+
+    SELECT CodTipoOp INTO v_codtipoop
+    FROM OPERACIONES WHERE CodOp = p_codop;
+
+    IF NOT FOUND THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: No existe la operación con código %.', p_codop;
+    END IF;
+
+    IF v_codtipoop != 2 THEN -- 2 = Haber
+        ROLLBACK;
+        RAISE EXCEPTION 'Error: La operación % no es válida. Debe ser de tipo Crédito (Haber).', p_codop;
+    END IF;
+
+    INSERT INTO MOVIMIENTOS (NrMov, Monto, Fecha, NrCuenta, CodOp, TipoCuenta)
+    VALUES (p_nrmov, p_monto, p_fecha, p_nrcuenta, p_codop, v_tipocuenta);
+
+    UPDATE CUENTAS 
+    SET Saldo = Saldo + p_monto 
+    WHERE NrCuenta = p_nrcuenta;
+
+    COMMIT;
+    RAISE NOTICE 'Transacción Exitosa: Crédito % registrado en la cuenta %.', p_nrmov, p_nrcuenta;
+
+END; $$;
+
+-- ===============================================================
+-- H.2 - SP_Transferencia (Modelo transaccional)
+-- ===============================================================
+
+-- SP para realizar una transferencia entre dos cuentas, registrando el débito en la cuenta de origen y el crédito en la cuenta de destino.
+
+CREATE OR REPLACE PROCEDURE sp_transferencia(
+    p_nrmov_sal INT,          -- ID movimiento para el débito (origen)
+    p_nrmov_ent INT,          -- ID movimiento para el crédito (destino)
+    p_cuenta_origen INT,
+    p_cuenta_destino INT,
+    p_monto MONEY,
+    p_codop_deb INT,
+    p_codop_cre INT,          
+    p_fecha DATE DEFAULT CURRENT_DATE
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF p_cuenta_origen = p_cuenta_destino THEN
+        ROLLBACK; 
+        RAISE EXCEPTION 'Error Transaccional: La cuenta de origen y destino no pueden ser la misma.';
+    END IF;
+
+    IF p_monto <= '0'::MONEY THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: El monto de la transferencia debe ser mayor a cero.';
+    END IF;
+
+    RAISE NOTICE 'Iniciando Paso A: Registrando débito en cuenta origen %...', p_cuenta_origen;
+    CALL sp_debito(p_nrmov_sal, p_cuenta_origen, p_codop_deb, p_monto, p_fecha);
+
+    RAISE NOTICE 'Iniciando Paso B: Registrando crédito en cuenta destino %...', p_cuenta_destino;
+    CALL sp_credito(p_nrmov_ent, p_cuenta_destino, p_codop_cre, p_monto, p_fecha);
+
+    COMMIT;
+    RAISE NOTICE 'Transacción Consolidada: Transferencia exitosa de % desde cuenta % a cuenta %.', 
+                 p_monto, p_cuenta_origen, p_cuenta_destino;
+
+END; $$;
+
+-- ===============================================================
+-- I - Cursores
+-- ===============================================================
+
+-- ===============================================================
+-- I.1 - Procedimiento transaccional de actualización
+-- ===============================================================
+
+-- SP para actualizar los sueldos de empleados por categoría, con control de errores y transaccionalidad.
+CREATE OR REPLACE PROCEDURE sp_actualizar_sueldos_por_categoria(
+    p_categ_1 VARCHAR, p_porc_1 NUMERIC,   
+    p_categ_2 VARCHAR, p_porc_2 NUMERIC,   
+    p_categ_3 VARCHAR, p_porc_3 NUMERIC    
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_existe_1 INT;
+    v_existe_2 INT;
+    v_existe_3 INT;
+BEGIN
+    IF p_porc_1 < -100 OR p_porc_2 < -100 OR p_porc_3 < -100 THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: Los porcentajes de ajuste no pueden determinar una quita mayor al -100%%.';
+    END IF;
+
+    SELECT COUNT(*) INTO v_existe_1 FROM CATEGORIAS WHERE Categ ILIKE '%' || TRIM(p_categ_1) || '%';
+    IF v_existe_1 = 0 THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: No se encontró ninguna categoría que coincida con "%".', p_categ_1;
+    END IF;
+
+    SELECT COUNT(*) INTO v_existe_2 FROM CATEGORIAS WHERE Categ ILIKE '%' || TRIM(p_categ_2) || '%';
+    IF v_existe_2 = 0 THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: No se encontró ninguna categoría que coincida con "%".', p_categ_2;
+    END IF;
+
+    SELECT COUNT(*) INTO v_existe_3 FROM CATEGORIAS WHERE Categ ILIKE '%' || TRIM(p_categ_3) || '%';
+    IF v_existe_3 = 0 THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: No se encontró ninguna categoría que coincida con "%".', p_categ_3;
+    END IF;
+
+    UPDATE CATEGORIAS 
+    SET Sueldo = Sueldo * (1 + (p_porc_1 / 100.0))
+    WHERE Categ ILIKE '%' || TRIM(p_categ_1) || '%';
+
+    UPDATE CATEGORIAS 
+    SET Sueldo = Sueldo * (1 + (p_porc_2 / 100.0))
+    WHERE Categ ILIKE '%' || TRIM(p_categ_2) || '%';
+
+    UPDATE CATEGORIAS 
+    SET Sueldo = Sueldo * (1 + (p_porc_3 / 100.0))
+    WHERE Categ ILIKE '%' || TRIM(p_categ_3) || '%';
+
+    COMMIT;
+    RAISE NOTICE 'Transacción Exitosa: Los sueldos de las categorías han sido actualizados de forma masiva.';
+
+END; $$;
+
+-- ===============================================================
+-- I.2 - Procedimiento transaccional de premiación
+-- ===============================================================
+
+-- SP para otorgar un premio de interés a todas las cuentas de Plazo Fijo con saldo mayor a un mínimo especificado, con control de errores y transaccionalidad.
+CREATE OR REPLACE PROCEDURE sp_otorgar_premio_plazo_fijo(
+    p_porcentaje NUMERIC DEFAULT 5.0,                  
+    p_tipo_busqueda VARCHAR DEFAULT 'Plazo Fijo',      
+    p_saldo_minimo MONEY DEFAULT '50000.00'::MONEY    
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_id_tipo_cuenta INT;
+    v_cuentas_afectadas INT;
+BEGIN
+    IF p_porcentaje <= 0 THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: El porcentaje de interés invertido debe ser mayor a cero.';
+    END IF;
+
+    SELECT TipoCuenta INTO v_id_tipo_cuenta 
+    FROM TIPOSCUENTAS 
+    WHERE Descripcion ILIKE '%' || TRIM(p_tipo_busqueda) || '%' 
+       OR Descripcion ILIKE '%PF%';
+
+    IF NOT FOUND THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: No se encontró el tipo de cuenta "%" en el sistema.', p_tipo_busqueda;
+    END IF;
+
+    SELECT COUNT(*) INTO v_cuentas_afectadas 
+    FROM CUENTAS 
+    WHERE TipoCuenta = v_id_tipo_cuenta AND Saldo > p_saldo_minimo;
+
+    IF v_cuentas_afectadas = 0 THEN
+        ROLLBACK;
+        RAISE EXCEPTION 'Error Transaccional: No se encontraron cuentas de tipo "%" con un saldo mayor a % a la fecha de hoy.', 
+                        p_tipo_busqueda, p_saldo_minimo;
+    END IF;
+
+    UPDATE CUENTAS
+    SET Saldo = Saldo * (1 + (p_porcentaje / 100.0))
+    WHERE TipoCuenta = v_id_tipo_cuenta AND Saldo > p_saldo_minimo;
+
+    COMMIT;
+    RAISE NOTICE 'Transacción Exitosa: Se otorgó el premio del %%% de interés a % cuentas de Plazo Fijo.', 
+                 p_porcentaje, v_cuentas_afectadas;
+
+END; $$;
